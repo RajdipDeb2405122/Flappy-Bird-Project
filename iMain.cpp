@@ -38,6 +38,7 @@ int lives = 5;
 int currentStreak = 0;
 
 float gameSpeedMultiplier = 1.0;
+float initialGameSpeedMultiplier = 1.0; // Persists user-set speed
 float scoreMultiplier = 1.0;
 int bgMusicChannel = -1;
 
@@ -46,7 +47,7 @@ float respawnTimer = 0;
 bool showSmash = false;
 Image imgSmash;
 int hitPipeIndex = -1;
-int hitBlockerBirdIndex = -1; // Tracks which blocker bird was hit
+int hitBlockerBirdIndex = -1;
 int currentLeaderboardIndex = -1;
 int loadedSlot = -1;
 
@@ -59,7 +60,7 @@ bool useBackground2 = false;
 Image imgbackground2;
 
 // Countdown images
-Image imgCountdown[5]; // For 5.png to 1.png
+Image imgCountdown[5];
 
 // UI
 int bX = 400, bY = 350, bWidth = 200, bHeight = 50, bSpace = 20;
@@ -83,7 +84,7 @@ bool enteringName = false;
 // Assets
 Image imgbackground, imgbase, imgpipe, imgpipeRed, imgGameover, imgDigits[10], frames[8];
 Sprite birdSprite;
-Sprite blockerBirdSprites[4]; // Sprites for blocker birds
+Sprite blockerBirdSprites[4];
 
 // Sound
 char sndPoint[] = "audio/point.wav";
@@ -97,7 +98,7 @@ typedef struct {
     float offsetY;
     float vy;
     bool active;
-    int currentFrame; // For sprite animation
+    int currentFrame;
 } BlockerBird;
 BlockerBird blockerBirds[4];
 
@@ -125,12 +126,14 @@ typedef struct {
     int pipeCounter;
     bool useRedPipes;
     bool useBackground2;
-    int hitBlockerBirdIndex; // Added to save blocker bird collision state
+    int hitBlockerBirdIndex;
 } SavedGame;
 
 SavedGame savedGames[MAX_SAVED_GAMES];
 
 bool finalHitAnimation = false;
+int lastBirdFrame = -1;
+float deltaTime = 16.0 / 1000.0;
 
 void iMouseDrag(int x, int y) {}
 void iMouseWheel(int dir, int x, int y) {}
@@ -246,9 +249,9 @@ void loadGame(int slot) {
         score = savedGames[slot].score;
         lives = savedGames[slot].lives;
         currentStreak = savedGames[slot].currentStreak;
-        gameSpeedMultiplier = savedGames[slot].gameSpeedMultiplier;
+        gameSpeedMultiplier = initialGameSpeedMultiplier; // Use user-set speed
         scoreMultiplier = savedGames[slot].scoreMultiplier;
-        pipeSpeed = savedGames[slot].pipeSpeed;
+        pipeSpeed = 3 * initialGameSpeedMultiplier;
         pipeCounter = savedGames[slot].pipeCounter;
         useRedPipes = savedGames[slot].useRedPipes;
         useBackground2 = savedGames[slot].useBackground2;
@@ -270,6 +273,7 @@ void loadGame(int slot) {
         gameState = INSTRUCTIONS;
         showInstructions = true;
         instructionTimer = 0;
+        lastBirdFrame = -1;
         printf("Loaded game from slot %d\n", slot + 1);
     }
 }
@@ -325,10 +329,10 @@ void initGame() {
     hitPipeIndex = -1;
     hitBlockerBirdIndex = -1;
     finalHitAnimation = false;
-    gameSpeedMultiplier = 1.0;
+    gameSpeedMultiplier = initialGameSpeedMultiplier; // Use user-set speed
     scoreMultiplier = 1.0;
     currentStreak = 0;
-    pipeSpeed = 3;
+    pipeSpeed = 3 * initialGameSpeedMultiplier;
     pipeCounter = 0;
     useRedPipes = false;
     enteringName = false;
@@ -337,6 +341,7 @@ void initGame() {
     loadedSlot = -1;
     showInstructions = true;
     instructionTimer = 0;
+    lastBirdFrame = -1;
 
     for (int i = 0; i < 4; i++) {
         if (i == 0)
@@ -362,13 +367,17 @@ bool checkCollision() {
     int bw = currentBirdFrame->width;
     int bh = currentBirdFrame->height;
 
-    iUpdateCollisionMask(&birdSprite);
+    if (birdSprite.currentFrame != lastBirdFrame) {
+        iUpdateCollisionMask(&birdSprite);
+        lastBirdFrame = birdSprite.currentFrame;
+    }
 
-    // Reset hit indices
     hitPipeIndex = -1;
     hitBlockerBirdIndex = -1;
 
     for (int i = 0; i < 4; i++) {
+        if (pipeX[i] > birdX + 200 || pipeX[i] + imgpipe.width < birdX - 200) continue;
+
         int bx1 = birdX;
         int bx2 = birdX + bw;
         int by1 = birdY;
@@ -378,7 +387,6 @@ bool checkCollision() {
         int px2 = pipeX[i] + imgpipe.width;
         int gy = GapY[i];
 
-        // Check collision with pipes
         int pipeBottomY1 = gy - imgpipe.height;
         int pipeBottomY2 = gy;
         if (bx2 > px1 && bx1 < px2 && by2 > pipeBottomY1 && by1 < pipeBottomY2) {
@@ -393,7 +401,6 @@ bool checkCollision() {
             return true;
         }
 
-        // Check collision with blocker birds
         if (blockerBirds[i].active) {
             float blockerX = pipeX[i] + imgpipe.width / 2 - blockerBirdSprites[i].frames[blockerBirdSprites[i].currentFrame].width / 2;
             float blockerY = GapY[i] + blockerBirds[i].offsetY - blockerBirdSprites[i].frames[blockerBirdSprites[i].currentFrame].height / 2;
@@ -419,6 +426,13 @@ bool checkCollision() {
 }
 
 void gameLoop() {
+    static unsigned long lastTime = 0;
+    unsigned long currentTime = glutGet(GLUT_ELAPSED_TIME);
+    if (lastTime != 0) {
+        deltaTime = (currentTime - lastTime) / 1000.0f;
+    }
+    lastTime = currentTime;
+
     if (gameState == INSTRUCTIONS) {
         instructionTimer += 16;
         if (instructionTimer >= 5000) {
@@ -433,8 +447,8 @@ void gameLoop() {
 
     if (finalHitAnimation) {
         respawnTimer += 16;
-        velocity += gravity * 2;
-        birdY += velocity;
+        velocity += gravity * 2 * deltaTime * 60.0f;
+        birdY += velocity * deltaTime * 60.0f;
         iAnimateSprite(&birdSprite);
         if (soundEnabled && respawnTimer == 16) iPlaySound(sndHit, false, 50);
 
@@ -471,34 +485,29 @@ void gameLoop() {
         respawnTimer += 16;
         if (respawnTimer < 1000) {
             showSmash = true;
-            velocity += gravity * 2;
-            birdY += velocity;
+            velocity += gravity * 2 * deltaTime * 60.0f;
+            birdY += velocity * deltaTime * 60.0f;
             if (soundEnabled && respawnTimer == 16) iPlaySound(sndHit, false, 50);
         } else if (respawnTimer < 2000) {
             showSmash = false;
-            velocity += gravity * 2;
-            birdY += velocity;
+            velocity += gravity * 2 * deltaTime * 60.0f;
+            birdY += velocity * deltaTime * 60.0f;
         } else {
             isRespawning = false;
             respawnTimer = 0;
 
-            // Check if collision was with a blocker bird and birdX is in the left one-fifth
             if (hitBlockerBirdIndex != -1 && birdX < WIDTH / 5) {
-                // Respawn just after the blocker bird's pipe
-                birdX = pipeX[hitBlockerBirdIndex] + imgpipe.width + 50;
+                birdX = pipeX[hitBlockerBirdIndex] + imgpipe.width + 100;
                 birdY = GapY[hitBlockerBirdIndex] + pipeGap / 2 - (birdSprite.frames[0].height / 2);
 
-                // Ensure birdX is within bounds
-                if (birdX < 0) birdX = 50;
-                if (birdX > WIDTH - birdSprite.frames[0].width) birdX = WIDTH - birdSprite.frames[0].width - 50;
+                if (birdX < 50) birdX = 50;
+                if (birdX > WIDTH - birdSprite.frames[0].width - 50) birdX = WIDTH - birdSprite.frames[0].width - 50;
 
-                // Ensure birdY is within safe bounds
-                if (birdY < imgbase.height + 20) birdY = imgbase.height + 20;
-                if (birdY > HEIGHT - birdSprite.frames[0].height - 20) birdY = HEIGHT - birdSprite.frames[0].height - 20;
+                if (birdY < imgbase.height + 50) birdY = imgbase.height + 50;
+                if (birdY > HEIGHT - birdSprite.frames[0].height - 50) birdY = HEIGHT - birdSprite.frames[0].height - 50;
 
                 printf("Respawning after blocker bird %d at x=%f, y=%f\n", hitBlockerBirdIndex, birdX, birdY);
             } else {
-                // Original respawn logic for pipe collisions or other cases
                 int closestPipeIndex = -1;
                 float minDistance = 99999;
                 for (int i = 0; i < 4; i++) {
@@ -511,12 +520,12 @@ void gameLoop() {
                     }
                 }
                 if (closestPipeIndex != -1) {
-                    birdX = pipeX[closestPipeIndex] - 200;
-                    if (birdX < 0) birdX = 50;
-                    if (birdX > WIDTH - birdSprite.frames[0].width) birdX = WIDTH - birdSprite.frames[0].width - 50;
+                    birdX = pipeX[closestPipeIndex] - 250;
+                    if (birdX < 50) birdX = 50;
+                    if (birdX > WIDTH - birdSprite.frames[0].width - 50) birdX = WIDTH - birdSprite.frames[0].width - 50;
                     birdY = GapY[closestPipeIndex] + pipeGap / 2 - (birdSprite.frames[0].height / 2);
-                    if (birdY < imgbase.height + 20) birdY = imgbase.height + 20;
-                    if (birdY > HEIGHT - birdSprite.frames[0].height - 20) birdY = HEIGHT - birdSprite.frames[0].height - 20;
+                    if (birdY < imgbase.height + 50) birdY = imgbase.height + 50;
+                    if (birdY > HEIGHT - birdSprite.frames[0].height - 50) birdY = HEIGHT - birdSprite.frames[0].height - 50;
                 } else {
                     birdX = WIDTH / 4;
                     birdY = HEIGHT / 2;
@@ -530,8 +539,8 @@ void gameLoop() {
         return;
     }
 
-    velocity += gravity;
-    birdY += velocity;
+    velocity += gravity * deltaTime * 60.0f;
+    birdY += velocity * deltaTime * 60.0f;
     iAnimateSprite(&birdSprite);
 
     for (int i = 0; i < 4; i++) {
@@ -541,7 +550,7 @@ void gameLoop() {
         }
     }
 
-    for (int i = 0; i < 4; i++) pipeX[i] -= pipeSpeed;
+    for (int i = 0; i < 4; i++) pipeX[i] -= pipeSpeed * deltaTime * 60.0f;
 
     int maxX = pipeX[0];
     for (int j = 1; j < 4; j++) if (pipeX[j] > maxX) maxX = pipeX[j];
@@ -551,7 +560,7 @@ void gameLoop() {
             int minY = imgbase.height + 30;
             int maxY = HEIGHT - pipeGap - 30;
             GapY[i] = rand() % (maxY - minY + 1) + minY;
-            if (score > 0 && score % 3 == 0 && !blockerBirds[i].active) {
+            if (pipeCounter % 3 == 0 && pipeCounter > 0) { // Blocker bird every 3 pipes
                 blockerBirds[i].offsetY = pipeGap / 2;
                 blockerBirds[i].vy = 1.0;
                 blockerBirds[i].active = true;
@@ -567,11 +576,12 @@ void gameLoop() {
             }
         }
         int bw = birdSprite.frames[0].width;
-        if (birdX + bw > pipeX[i] + imgpipe.width && birdX + bw - pipeSpeed <= pipeX[i] + imgpipe.width) {
+        if (birdX + bw > pipeX[i] + imgpipe.width && birdX + bw - pipeSpeed * deltaTime * 60.0f <= pipeX[i] + imgpipe.width) {
             score++;
             currentStreak++;
             if (currentStreak % 9 == 0) {
-                gameSpeedMultiplier += 0.2;
+                gameSpeedMultiplier += 0.1; // Increase by 0.1x
+                if (gameSpeedMultiplier > 2.0) gameSpeedMultiplier = 2.0; // Cap at 2.0x
                 pipeSpeed = 3 * gameSpeedMultiplier;
                 scoreMultiplier *= 2;
             }
@@ -592,7 +602,6 @@ void gameLoop() {
             respawnTimer = 0;
             showSmash = true;
             velocity = jumpStrength;
-            gameSpeedMultiplier = 1.0;
             scoreMultiplier = 1.0;
             currentStreak = 0;
             if (soundEnabled) iPlaySound(sndHit, false, 50);
@@ -602,7 +611,6 @@ void gameLoop() {
             showSmash = true;
             respawnTimer = 0;
             velocity = jumpStrength;
-            gameSpeedMultiplier = 1.0;
             scoreMultiplier = 1.0;
             currentStreak = 0;
             if (soundEnabled) iPlaySound(sndHit, false, 50);
@@ -612,7 +620,7 @@ void gameLoop() {
 
     for (int i = 0; i < 4; i++) {
         if (blockerBirds[i].active) {
-            blockerBirds[i].offsetY += blockerBirds[i].vy;
+            blockerBirds[i].offsetY += blockerBirds[i].vy * deltaTime * 60.0f;
             if (blockerBirds[i].offsetY > pipeGap - 20 || blockerBirds[i].offsetY < 20) {
                 blockerBirds[i].vy *= -1;
             }
@@ -743,7 +751,7 @@ void iDraw() {
         sprintf(volumeStr, "Music Volume: %d (Press UP/DOWN to adjust)", musicVolume);
         iTextAdvanced(250, 400, volumeStr, 0.2, 2.0, GLUT_STROKE_ROMAN);
         char speedStr[50];
-        sprintf(speedStr, "Game Speed: %.1fx (Press LEFT/RIGHT to adjust)", gameSpeedMultiplier);
+        sprintf(speedStr, "Game Speed: %.1fx (Press LEFT/RIGHT to adjust)", initialGameSpeedMultiplier);
         iTextAdvanced(250, 350, speedStr, 0.2, 2.0, GLUT_STROKE_ROMAN);
         iTextAdvanced(250, 300, useBackground2 ? "Background: BGIMAGE2 (Press B to toggle)" : "Background: BGIMAGE (Press B to toggle)", 0.2, 2.0, GLUT_STROKE_ROMAN);
         iSetColor(255, 0, 0);
@@ -768,7 +776,7 @@ void iDraw() {
         iTextAdvanced(WIDTH / 2 - 250, HEIGHT / 2, "- Avoid pipes and blocker birds.", 0.2, 2.0, GLUT_STROKE_ROMAN);
         iTextAdvanced(WIDTH / 2 - 250, HEIGHT / 2 - 40, "- +1 life every 100 points (max 5).", 0.2, 2.0, GLUT_STROKE_ROMAN);
         iTextAdvanced(WIDTH / 2 - 250, HEIGHT / 2 - 80, "- Press P to pause, M for menu.", 0.2, 2.0, GLUT_STROKE_ROMAN);
-        iTextAdvanced(WIDTH / 2 - 250, HEIGHT / 2 - 120, "- Speed increases after passing every 9 pipes.", 0.2, 2.0, GLUT_STROKE_ROMAN);
+        iTextAdvanced(WIDTH / 2 - 250, HEIGHT / 2 - 120, "- Speed increases by 0.1x after every 9 pipes.", 0.2, 2.0, GLUT_STROKE_ROMAN);
         iTextAdvanced(300, 50, "Press M to return to the Menu", 0.2, 2.0, GLUT_STROKE_ROMAN);
     } else if (gameState == LOAD_GAME) {
         iSetColor(255, 255, 0);
@@ -901,8 +909,6 @@ void iMouseMove(int mx, int my) {
 }
 
 void iKeyboard(unsigned char key) {
-  //  key = tolower(key);
-
     if (gameState == GAMEOVER && enteringName) {
         if (key == 13) {
             enteringName = false;
@@ -1100,12 +1106,12 @@ void iSpecialKeyboard(unsigned char key) {
         } else if (key == GLUT_KEY_DOWN && musicVolume > 0) {
             musicVolume -= 2;
             Mix_Volume(bgMusicChannel, musicVolume * MIX_MAX_VOLUME / 100);
-        } else if (key == GLUT_KEY_RIGHT && gameSpeedMultiplier < 2.0) {
-            gameSpeedMultiplier += 0.1;
-            pipeSpeed = 3 * gameSpeedMultiplier;
-        } else if (key == GLUT_KEY_LEFT && gameSpeedMultiplier > 0.5) {
-            gameSpeedMultiplier -= 0.1;
-            pipeSpeed = 3 * gameSpeedMultiplier;
+        } else if (key == GLUT_KEY_RIGHT && initialGameSpeedMultiplier < 2.0) {
+            initialGameSpeedMultiplier += 0.1;
+            if (initialGameSpeedMultiplier > 2.0) initialGameSpeedMultiplier = 2.0;
+        } else if (key == GLUT_KEY_LEFT && initialGameSpeedMultiplier > 0.5) {
+            initialGameSpeedMultiplier -= 0.1;
+            if (initialGameSpeedMultiplier < 0.5) initialGameSpeedMultiplier = 0.5;
         }
     }
 }
@@ -1113,6 +1119,7 @@ void iSpecialKeyboard(unsigned char key) {
 int main(int argc, char **argv) {
     glutInit(&argc, argv);
     srand(time(0));
+    initialGameSpeedMultiplier = 1.0; // Reset to 1.0 on program start
     initGame();
     LoadResources();
     iSetTimer(16, gameLoop);
