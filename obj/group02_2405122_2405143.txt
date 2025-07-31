@@ -4,4 +4,4 @@ Sheikh Shabab Ahmed(ID: 2405143)
 
 GitHub repository:
 
-https://github.com/RajdipDeb2405122/Flappy-Bird
+https://github.com/RajdipDeb2405122/Flappy-Bird-Project
