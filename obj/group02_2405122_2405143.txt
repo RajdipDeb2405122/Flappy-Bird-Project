@@ -1,0 +1,7 @@
+Group:02
+Rajdip Deb(ID: 2405122)
+Sheikh Shabab Ahmed(ID: 2405143)
+
+GitHub repository:
+
+https://github.com/RajdipDeb2405122/Flappy-Bird
